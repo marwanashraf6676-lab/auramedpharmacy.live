@@ -47,7 +47,7 @@
       color: #fff;
       min-height: 100vh;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
       padding: 18px;
     }
@@ -201,7 +201,7 @@
       width: 100%;
       height: 100%;
       border-radius: 50%;
-      object-fit: cover;
+      object-fit: contain;
       display: block;
     }
 
@@ -1020,184 +1020,90 @@
     );
 
 
-    function jsonpRequest(url, params) {
-
-      return new Promise(
-        function (resolve, reject) {
-
-          var cb =
-            "cb_" +
-            Math.random()
-              .toString(36)
-              .slice(2);
-
-
-          var script =
-            document.createElement("script");
-
-
-          var query = [];
-
-
-          params.callback = cb;
-
-
-          Object.keys(params)
-            .forEach(
-              function (key) {
-
-                query.push(
-                  encodeURIComponent(key) +
-                  "=" +
-                  encodeURIComponent(params[key])
-                );
-
-              }
-            );
-
-
-          script.src =
-            url +
-            "?" +
-            query.join("&");
-
-
-          function cleanup() {
-
-            try {
-
-              delete window[cb];
-
-            } catch (e) {}
-
-
-            if (script.parentNode) {
-
-              script.parentNode
-                .removeChild(script);
-
-            }
-
-          }
-
-
-          window[cb] =
-            function (data) {
-
-              cleanup();
-
-              resolve(data);
-
-            };
-
-
-          script.onerror =
-            function () {
-
-              cleanup();
-
-              reject(
-                new Error("network")
-              );
-
-            };
-
-
-          document.body
-            .appendChild(script);
-
-        }
-      );
-
+    function normalizePhone(value) {
+      var digits = String(value || "").replace(/\D/g, "");
+      if (digits.length === 11 && digits.charAt(0) === "0") {
+        digits = digits.slice(1);
+      }
+      return digits;
     }
 
+    function parseSimpleCsv(text) {
+      var lines = String(text || "")
+        .replace(/^\uFEFF/, "")
+        .split(/\r?\n/)
+        .filter(function (line) {
+          return line.trim() !== "";
+        });
+
+      if (lines.length < 2) return [];
+
+      var headers = lines[0].split(",").map(function (h) {
+        return h.trim().toLowerCase();
+      });
+
+      return lines.slice(1).map(function (line) {
+        var cols = line.split(",");
+        var obj = {};
+        headers.forEach(function (h, i) {
+          obj[h] = (cols[i] || "").trim();
+        });
+        return obj;
+      });
+    }
+
+    async function loadPointsData() {
+      var response = await fetch("./points.csv?v=" + Date.now(), {
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error("csv");
+      }
+
+      return parseSimpleCsv(await response.text());
+    }
 
     document
       .getElementById("pointCheck")
-      .onclick = function () {
+      .onclick = async function () {
 
-        pointsBox.style.display =
-          "none";
-
-        pointsBox.classList
-          .remove("show");
-
+        pointsBox.style.display = "none";
+        pointsBox.classList.remove("show");
         errorMsg.textContent = "";
 
+        var enteredPhone = normalizePhone(pointPhone.value);
+        var enteredCode = String(pointCode.value || "").trim();
 
-        if (
-          !pointPhone.value ||
-          !pointCode.value
-        ) {
-
+        if (!enteredPhone || !enteredCode) {
           errorMsg.textContent =
             "من فضلك اكتب رقم الموبايل والكود.";
-
           return;
-
         }
 
+        errorMsg.textContent = "جارٍ الاستعلام...";
 
-        errorMsg.textContent =
-          "جارٍ الاستعلام...";
+        try {
+          var data = await loadPointsData();
 
+          var match = data.find(function (row) {
+            return normalizePhone(row.phone) === enteredPhone &&
+                   String(row.code || "").trim() === enteredCode;
+          });
 
-        jsonpRequest(
-          API_URL,
-          {
-            phone:
-              pointPhone.value.trim(),
-
-            code:
-              pointCode.value.trim()
+          if (match) {
+            errorMsg.textContent = "";
+            pointsValue.textContent = match.points || "0";
+            pointsBox.style.display = "flex";
+            pointsBox.classList.remove("show");
+            void pointsBox.offsetWidth;
+            pointsBox.classList.add("show");
+          } else {
+            errorMsg.textContent = "الرقم أو الكود غير صحيح.";
           }
-        )
-
-        .then(
-          function (data) {
-
-            if (data.ok) {
-
-              errorMsg.textContent = "";
-
-              pointsValue.textContent =
-                data.points;
-
-
-              pointsBox.style.display =
-                "flex";
-
-
-              pointsBox.classList
-                .remove("show");
-
-
-              void pointsBox.offsetWidth;
-
-
-              pointsBox.classList
-                .add("show");
-
-            } else {
-
-              errorMsg.textContent =
-                data.message ||
-                "الرقم أو الكود غير صحيح.";
-
-            }
-
-          }
-        )
-
-        .catch(
-          function () {
-
-            errorMsg.textContent =
-              "تعذر الاتصال بالخدمة.";
-
-          }
-        );
-
+        } catch (e) {
+          errorMsg.textContent = "تعذر قراءة ملف النقاط.";
+        }
       };
 
 
